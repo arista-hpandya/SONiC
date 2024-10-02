@@ -15,6 +15,8 @@
         - [1.1.1 A flexible "drop filter"](#111-a-flexible-"drop-filter")
         - [1.1.2 A helpful debugging tool](#112-a-helpful-debugging-tool)
         - [1.1.3 More sophisticated monitoring schemes](#113-more-sophisticated-monitoring-schemes)
+        - [1.1.4 Alerting on persistent drops](#114-alerting-on-persistent-drops)
+
 * [2 Requirements](#2-requirements)
     - [2.1 Functional Requirements](#21-functional-requirements)
     - [2.2 Configuration and Management Requirements](#22-configuration-and-management-requirements)
@@ -108,6 +110,9 @@ Some have suggested other deployment schemes to try to sample the specific types
 - Periodically (e.g. every 30s) cycling through different sets of drop counters on a given device
 - "Striping" drop counters across different devices in the system (e.g. these 3 switches are tracking VLAN drops, these 3 switches are tracking ACL drops, etc.)
 - An automatic version of [1.1.2](#112-a-helpful-debugging-tool) that adapts the drop counter configuration based on which counters are incrementing
+
+### 1.1.4 Alerting on persistent drops
+To further help with debugging packet loss issues described in [1.1.2](#112-a-helpful-debugging-tool), drop counters also provide the functionality to detect persistent drops. These persistent drops can be reported via syslogs or similar mechanisms. More details on how we define persistent drops and the correct way to configure this feature can be found in [3.1.6](#316-configuring-persistent-drop-counters-from-the-CLI)
 
 # 2 Requirements
 
