@@ -1,7 +1,7 @@
 # Configurable Drop Counters in SONiC
 
 # High Level Design Document
-#### Rev 1.0
+#### Rev 1.1
 
 # Table of Contents
 * [List of Tables](#list-of-tables)
@@ -27,6 +27,7 @@
         - [3.1.3 Displaying the current counts](#313-displaying-the-current-counts)
         - [3.1.4 Clearing the counts](#314-clearing-the-counts)
         - [3.1.5 Configuring counters from the CLI](#315-configuring-counters-from-the-CLI)
+        - [3.1.6 Configuring persistent drop counters from the CLI](#316-configuring-persistent-drop-counters-from-the-CLI)
     - [3.2 Config DB](#32-config-db)
         - [3.2.1 DEBUG_COUNTER Table](#321-debug_counter-table)
         - [3.2.2 PACKET_DROP_COUNTER_REASON Table](#322-packet_drop_counter_reason-table)
@@ -60,6 +61,7 @@
 | 0.2 | 09/03/19 | Danny Allen | Review updates            |
 | 0.3 | 09/19/19 | Danny Allen | Community meeting updates |
 | 1.0 | 11/19/19 | Danny Allen | Code review updates       |
+| 1.1 | 09/24/24 | Hetav Pandya | Persistent drop counter monitoring added |
 
 # About this Manual
 This document provides an overview of the implementation of configurable packet drop counters in SONiC.
@@ -98,6 +100,8 @@ Another potential use case is to configure the counters on the fly in order to h
 - L2_ANY is incrementing, so we delete these two counters and create MAC_COUNTER that tracks MAC-related reasons (SMAC_EQUALS_DMAC, DMAC_RESERVED, etc.), VLAN_COUNTER that tracks VLAN related reasons, (INGRESS_VLAN_FILTER, VLAN_TAG_NOT_ALLOWED), and OTHER_COUNTER that tracks everything else (EXCEEDS_L2_MTU, FDB_UC_DISCARD, etc.)
 - OTHER_COUNTER is incrementing, so we delete the previous counters and create a counter that tracks the individual reasons from OTHER_COUNTER
 - We discover that the EXCEEDS_L2_MTU counter is increasing. There might be an MTU mismatch somewhere in our system!
+
+Drop counters also provide the functionality to detect persistent drops. By specifying the correct values for window, incident_count_window and drop_count_threshold the user can generate logs for counters that experience persistent drops. More details about configuring this feature can be found in [3.1.6](#316-configuring-persistent-drop-counters-from-the-CLI)
 
 ### 1.1.3 More sophisticated monitoring schemes
 Some have suggested other deployment schemes to try to sample the specific types of packet drops that are occurring in their system. Some of these ideas include:
@@ -233,6 +237,36 @@ admin@sonic:~$ sudo config dropcounters remove_reasons DEBUG_2 [SIP_CLASS_E]
 admin@sonic:~$ sudo config dropcounters delete DEBUG_2
 ```
 
+### 3.1.6 Configuring persistent drop counters from the CLI
+The persistent drop threshold requires three additional parameters when installing the drop counter, they are as follows:
+- window:
+    - The sliding time window (defined in seconds) for detecting persistent drops. We ignore drops outside this moving window
+    - Argument: -w
+    - Default: 900 (15 minutes)
+- drop_threshold:
+    - The minimum number of drops that have to occur per window for it to be registered as an incident.
+    - Argument: -t
+    - Default: None
+- incident_count:
+    - The number of threshold violations (incidents) that will trigger a syslog entry
+    - Argument: -c
+    - Default: 3
+
+For example, assume a counter configured with window of 60 seconds, drop_threshold of 100, and incident_count set to 2. For every 1 minute time window, if this counter has more than 100 drop counts detected for a minimum of 3 times, we will log this in syslog.
+
+In the figure below, the height of the vertical line signifies the number of drops. The drops that exceed the drop_threshold are highlighted in red. At each polling time instant (T1/T2/T3) the figure shows the corresponding sliding window. Note how the time windows are overlapping and we only count the violations that have occurred in the time window.
+
+The counters are polled when the orchagent's `doTask()` method is called. As per the current implementation `doTask()` is polled indefinately as a part of an infinite loop. You can check the implementation [here](https://github.com/sonic-net/sonic-swss/blob/3c230d2b51ebf2ffc7163b2641ffab7ef358bfd4/orchagent/orchdaemon.cpp#L882).
+
+The design plan is to add more control and stability over this and fix the polling instance to 10 seconds internally. This would not be directly configurable however, the user can adjust the threshold value according to their needs.
+
+![image](https://github.com/user-attachments/assets/afb66e21-788e-4623-9162-c09042a505b5)
+
+```
+admin@sonic:~$ sudo config dropcounters install DEBUG_2 PORT_INGRESS_DROPS [EXCEEDS_L2_MTU,DECAP_ERROR] -d "More port ingress drops" -g BAD -a BAD_DROPS -w 900 -t 100 -c 3
+admin@sonic:~$ sudo show dropcounters configuration
+```
+
 ## 3.2 Config DB
 Two new tables will be added to Config DB:
 * DEBUG_COUNTER to store general debug counter metadata
@@ -253,7 +287,10 @@ Example:
             "alias": "PORT_TX_LEGIT",
             "type": "PORT_EGRESS_DROPS",
             "desc": "Legitimate port-level TX pipeline drops"
-            "group": "LEGIT"
+            "group": "LEGIT",
+            "window": 600,
+            "incident_count": 2,
+            "drop_threshold": 100
         },
         "DEBUG_2": {
             "alias": "SWITCH_RX_LEGIT",
